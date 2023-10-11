@@ -24,6 +24,9 @@ class Message(BaseModel):
 
     @classmethod
     def mk(cls, role: str, content: str):
+        if content is None:
+            raise RuntimeError("CONTENT IS NONE!")
+            sys.exit(1)
         if role in ["system", "user", "assistant"]:
             return cls(role=role, content=content, name=None)  # type: ignore
         else:

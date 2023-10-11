@@ -75,7 +75,6 @@ class AgentRunResult(ABC):
     Abstract base class for AgentRunResult
     """
 
-
 @dataclass
 class AgentState(ABC):
     """

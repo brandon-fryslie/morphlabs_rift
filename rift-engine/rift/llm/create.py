@@ -2,11 +2,16 @@ import functools
 import logging
 import os
 import weakref
+from pathlib import Path
 from typing import Literal, Optional, Tuple
+
+morph_model_dir = Path.home().joinpath(".morph", "models")
 
 from pydantic import BaseModel, SecretStr
 
 from rift.llm.abstract import AbstractChatCompletionProvider, AbstractCodeCompletionProvider
+
+logger = logging.getLogger(__name__)
 
 
 class ModelConfig(BaseModel):
@@ -21,18 +26,21 @@ class ModelConfig(BaseModel):
         return hash(self) == hash(other)
 
     def create_chat(self) -> AbstractChatCompletionProvider:
+        logger.info(f"creating chat {self.chatModel}")
         c = create_client(self.chatModel, self.openaiKey)
         assert isinstance(c, AbstractChatCompletionProvider)
         return c
 
-    def create_completions(self) -> AbstractCodeCompletionProvider:
+    def create_code_edit(self) -> AbstractCodeCompletionProvider:
+        logger.info(f"creating code edit {self.codeEditModel}")
         return create_client(self.codeEditModel, self.openaiKey)
 
     @classmethod
     def default(cls):
+        # we ignore the model name
         return ModelConfig(
-            codeEditModel="openai:gpt-4",
-            chatModel="openai:gpt-3.5-turbo",
+            codeEditModel="vertexaillama:any",
+            chatModel="vertexaillama:any",
         )
 
 
@@ -83,25 +91,14 @@ def create_client_core(
     If the `type` is none of the above, it raises a `ValueError` with a message indicating that the model is unknown.
     """
     type, name, path = parse_type_name_path(config)
-    if type == "hf":
-        from rift.llm.hf_client import HuggingFaceClient
+    logger.info(f"{type=} {name=} {path=}")
+    from rift.llm.vertexai_llama_client import VertexAiLlamaClient
 
-        return HuggingFaceClient(name)
-    elif type == "openai":
+    if type == "openai":
         from rift.llm.openai_client import OpenAIClient
-
         kwargs = {}
-        if name:
-            kwargs["default_model"] = name
-        if openai_api_key:
-            kwargs["api_key"] = openai_api_key
-        else:
-            if not os.environ.get("OPENAI_API_KEY"):
-                logging.getLogger().error(
-                    "Trying to create an OpenAIClient without an OpenAI key set in Rift settings or set as the OPENAI_API_KEY environment variable."
-                )
-        if path:
-            kwargs["api_url"] = path
+        kwargs["default_model"] = "not-used"
+        kwargs["api_key"] = "not-used"
         return OpenAIClient.parse_obj(kwargs)
 
     elif type == "gpt4all":
@@ -114,6 +111,13 @@ def create_client_core(
             kwargs["model_path"] = path
         settings = Gpt4AllSettings.parse_obj(kwargs)
         return Gpt4AllModel(settings)
+    elif type == "llama":  # llama-cpp-python
+        from rift.llm.llama_client import LlamaClient
 
-    else:
-        raise ValueError(f"Unknown model: {config}")
+    elif type == "vertexaillama":
+        parsed_path = Path(path if path else name)
+        if not parsed_path.is_absolute():
+            parsed_path = morph_model_dir.joinpath(parsed_path)
+        logger.info(f"Creating LLaMa client with model located at {path}")
+
+        return VertexAiLlamaClient(name=name, model_path=str(parsed_path) if path or name else None)
